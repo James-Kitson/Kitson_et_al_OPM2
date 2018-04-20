@@ -31,3 +31,11 @@ vignettes/*.pdf
 # Temporary files created by R markdown
 *.utf8.md
 *.knit.md
+.Rproj.user
+*.Rproj
+
+# Other bits and pieces to ignore possibly temporarily
+Raw_data
+Processed_data
+data
+Jupyter_notebook/.ipynb_checkpoints
