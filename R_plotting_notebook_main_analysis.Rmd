@@ -1,0 +1,536 @@
+---
+title: "Summary plotting of metaBEAT output"
+output: html_notebook
+---
+
+#This markdown notebook outlines step by step the processing of [metaBEAT](https://github.com/HullUni-bioinformatics/metaBEAT) output data to produce the figures using in Kitson *et al.* (2017)
+
+#Part 1: Minimum cluster depth analysis
+We need to see how the number of clusters retained and read depth per well changes with different minimum cluster sizes. We want to end up in a situation where we are retaining only the most common unique sequences as these are likely to be the real biological systems. We will ideally also avoid clustering with thresholds lower than 100% as this can pull in rare sequencing errors and result in a centroid that is not in fact a genuine biological sequence. We have already iterated across minimum cluster sizes in the [Jupyter notebook](https://github.com/HullUni-bioinformatics/Kitson_et_al_NMB/blob/master/Jupyter_notebook/OPM_NMB_main_analysis.ipynb) so now we will use this data to help us choose a minimum cluster size.
+
+###First of all read in all the libraries we'll need to process the data
+```{r}
+### Clear the workspace
+rm(list=ls())
+
+### Load the libraries
+library(reshape2)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+library(scales)
+library(RColorBrewer)
+library(gtable)
+```
+
+###Plotting clusters retained and read depth against minimum cluster size - __all samples__
+The aim of these plots is to look for a region of minimum cluster sizes that result in stable values for clusters retained or per well read depth and then choose the __minimum__ stable value to maximise clusters retained. The assumption underlying this is that once we reach a stable set of parameter values we are looking at the real data *i.e.* any clusters retained in the stable region of minimum cluster size represent genuine biological sequences and not rare sequencing/PCR error.
+```{r}
+### Read in the data and look at the number of clusters and read depth against minimum cluster size
+read.stats<-read.csv(file="data/Richard_combined_read_stats_all.csv", stringsAsFactors=FALSE, header=TRUE)
+
+### Create a plot of number clusters in PCR wells by minimum cluster size
+all.clusters<-ggplot(data = read.stats, aes(x=as.factor(clusters_min_cov), y=cluster_above_thres)) +
+  geom_boxplot() +
+  labs(y = "Clusters retained (all PCR wells)", x="Minimum cluster coverage") +
+### make the labels more visible
+  theme(axis.text = element_text(size = rel(1.2)),
+         axis.title = element_text(size = rel(1.2)))
+### Create a plot of read depth in PCR wells by minimum cluster size
+all.reads<-ggplot(data = read.stats, aes(x=as.factor(clusters_min_cov), y=queries)) +
+  geom_boxplot() +
+  labs(y = "Per well read depth (all PCR wells)", x="Minimum cluster coverage") +
+### make the labels more visible
+  theme(axis.text = element_text(size = rel(1.2)),
+         axis.title = element_text(size = rel(1.2)))
+```
+
+###Plotting clusters retained and read depth against minimum cluster size - __just negatives__
+We should process the data a bit more so we can examine just negative controls as these give an indication of any possible background noise/contamination present in all NGS sequencing runs.
+```{r}
+### greedy regex to split the sample string by the underscore and leave us with a column for nest and a column for indentifier
+read.stats<-cbind(read.stats, do.call(rbind, strsplit(as.character(read.stats$sample), "_|_.*_")))
+
+### rename the last column as type
+colnames(read.stats)[ncol(read.stats)]<-'template'
+### process the last column into a sample type factor using a horrible ifelse statement
+read.stats$type<-ifelse(read.stats$template=="PCRneg","Negative",
+                          ifelse(read.stats$template=="eneg","Negative",
+                            ifelse(read.stats$template=="DNAp","DNApositive",
+                              ifelse(read.stats$template=="PCRp","PCRpositive","Sample"))))
+### make the type column a factor
+read.stats$type<-as.factor(read.stats$type)
+### drop the columns, we don't need
+#read.stats<-read.stats[,c(1:(ncol(read.stats)-3),ncol(read.stats))]
+
+### Create a plot of number clusters in negative wells by minimum cluster size
+neg.clusters<-ggplot(data = subset(read.stats, type=="Negative"), aes(x=as.factor(clusters_min_cov), y=cluster_above_thres)) +
+  geom_boxplot() +
+  labs(y = "Clusters retained (negative PCR wells)", x="Minimum cluster coverage") +
+    scale_y_continuous(expand = c(0, 0), limits = c(0,2.5)) +
+### make the labels more visible
+  theme(axis.text = element_text(size = rel(1.2)),
+         axis.title = element_text(size = rel(1.2)))
+### Create a plot of read depth in negative wells by minimum cluster size
+neg.reads<-ggplot(data = subset(read.stats, type=="Negative"), aes(x=as.factor(clusters_min_cov), y=queries)) +
+  geom_boxplot() +
+  labs(y = "Per well read depth (negative PCR wells)", x="Minimum cluster coverage") +
+### make the labels more visible
+  theme(axis.text = element_text(size = rel(1.2)),
+         axis.title = element_text(size = rel(1.2)))
+```
+
+```{r}
+### convert ggplots to grobs for use in gtable so that the y axes are correctly alinged
+grob.all.reads <- ggplotGrob(all.reads)
+grob.neg.reads <- ggplotGrob(neg.reads)
+g.reads <- rbind(grob.neg.reads, grob.all.reads, size="first")
+g.reads$widths <- unit.pmax(grob.neg.reads$widths, grob.all.reads$widths)
+grid.newpage()
+
+### Write the grobbed ggplots to an svg
+svg(file="diagrams/FigureS6_run2.svg",12,8)
+grid.draw(g.reads)
+dev.off()
+
+### replot the above plot here for convenience
+grid.draw(g.reads)
+```
+
+```{r}
+### convert ggplots to grobs for use in gtable so that the y axes are correctly alinged
+grob.all.clusters <- ggplotGrob(all.clusters)
+grob.neg.clusters <- ggplotGrob(neg.clusters)
+g.clusters <- rbind(grob.neg.clusters, grob.all.clusters , size="first")
+g.clusters$widths <- unit.pmax(grob.neg.clusters$widths, grob.all.clusters$widths)
+grid.newpage()
+
+### Write the grobbed ggplots to an svg
+svg(file="diagrams/FigureS7_run2.svg",12,8)
+grid.draw(g.clusters)
+dev.off()
+
+### replot the above plot here for convenience
+grid.draw(g.clusters)
+```
+
+###Mistagging analysis
+Now that we have checked for a stable cluster size and contamination in our negatives, we should also check for mistagging in our sequencing data. To do this we have deliberately excluded certain tag combinations during PCR set up. We can now perform an analysis similar to the ones above but instead of using our tag combinations associated with samples, we use a query map with all the illegal tag combinations (84 combinations).
+
+```{r}
+### Read in the data and look at the number of clusters and read depth against minimum cluster size
+null.read.stats<-read.csv(file="data/combined_illegal_read_stats_run2.csv", stringsAsFactors=FALSE, header=TRUE)
+
+### Create a plot of read depth in PCR wells by minimum cluster size
+null.reads<-ggplot(data = null.read.stats, aes(x=as.factor(clusters_min_cov), y=queries)) +
+  geom_boxplot() +
+  labs(y = "Per well read depth (all PCR wells)", x="Minimum cluster coverage") +
+### make the labels more visible
+  theme(axis.text = element_text(size = rel(1.2)),
+         axis.title = element_text(size = rel(1.2)))
+
+### Write the grobbed ggplots to an svg
+svg(file="diagrams/FigureS8_run2.svg",12,8)
+null.reads
+dev.off()
+
+### replot the above plot here for convenience
+null.reads
+```
+
+
+###Conclusions
+Looking at the plots for per well read  and cluster depths for all samples suggests that a minimum cluster size between 46 and 61 reads results in the removal of rare sequences. Similarly we can see from the clusters and retained reads in the negatives, it is clear that removing any clusters smaller than 41 reads effectively excludes low level background contamination. Finally the mistagging analysis suggestes that aminimum read depth of >66 reads is sufficient to remove background contamination from mistagging. These values suggest that a minimum cluster size of about 67 reads will be sufficient to remove background noise in our dataset.
+
+#Part 2: Main data analysis
+In part one we decided on an a set of minimum cluster sizes for our final analysis based on three possible selection criteria. We then used these values in the [Jupyter notebook](https://github.com/HullUni-bioinformatics/Kitson_et_al_NMB/blob/master/Jupyter_notebook/OPM_NMB_main_analysis.ipynb) to run a final analysis for each minimum cluster size. Now we need to examine this output, check that negatives are clean and examine the contents of each well.
+
+###Calculating percentage parasitism for each coverage threshold
+```{r}
+### make a list of output files
+assignment.files <- paste("data/", grep("metaBEAT_transpose_.._run2", list.files(path="data/"), value = TRUE),sep="")
+### read in the tables into a list we can loop across
+assignment.list <- lapply(assignment.files, read.table, stringsAsFactors=FALSE, header=TRUE, sep="\t")
+names(assignment.list)<-c("37 reads","52 reads","67 reads")
+
+### make lists of % parasitism for each parasitoid
+carcelia.list<-lapply(assignment.list, with, (colSums(assignment.list[[i]]["Carcelia_iliaca"] > 0)/1012)*100)
+compsilura.list<-lapply(assignment.list, with, (colSums(assignment.list[[i]]["Compsilura_concinnata"] > 0)/1012)*100)
+
+### make the lists into vectors and bind them into a data frame for exporting
+carcelia <- do.call("rbind",carcelia.list)
+compsilura <- do.call("rbind",compsilura.list)
+parasitism.rates <- round(as.data.frame(cbind(carcelia,compsilura)),1)
+
+### write this dataframe to a table for the manuscript
+write.csv(parasitism.rates, file="data/Table1.csv")
+```
+
+###Calculating percentage sequencing success each coverage threshold
+```{r}
+### read in the combined read stats
+combined.read.stats<-read.csv(file="data/combined_final_read_stats_run2.csv", stringsAsFactors = FALSE, header = TRUE)
+
+### list the % sequencing sucess for each clustering threshold
+for(i in c(37,52,67)){
+print(paste("Sequencing success (all PCR wells) for minimum cluster coverage of ", i, " reads = ", 
+      round((sum(subset(combined.read.stats, clusters_min_cov==i, select=queries)>0)/nrow(subset(combined.read.stats, clusters_min_cov==i)))*100,1),
+      "%",sep=""))
+}
+```
+
+
+###Analysis of trimming process
+First of all we need to read in the read statistics and metadata then process the data files into annoted forms suitable for plotting.
+
+```{r}
+### Subset the combined read stats to the cluster coverage we will finally use
+final.read.stats<-subset(combined.read.stats, clusters_min_cov == "67")
+
+### read in the sample metadata
+my.plates<-read.table(file="data/sample_metadata_run2.tsv", stringsAsFactors=FALSE, header=TRUE, sep="\t")
+
+### greedy regex to split the sample string by the underscore and leave us with a column for nest and a column for indentifier
+my.plates<-cbind(my.plates, do.call(rbind, strsplit(as.character(my.plates$sample), "_|_.*_")))
+
+### trim the plate data to the necessary columns (i.e. drop the identifier column)
+my.plates<-my.plates[, c(1:5,7)]
+### name the columns
+colnames(my.plates)<-c("sample", "plate", "plate.numeric", "well", "strength", "template")
+
+### process the template column into a sample type factor using a horrible ifelse statement
+my.plates$type<-ifelse(my.plates$template=="neg1","Negative",
+                          ifelse(my.plates$template=="neg2","Negative",
+                            ifelse(my.plates$template=="DNApositive","DNApositive",
+                              ifelse(my.plates$template=="PCRpositive","PCRpositive","Moth sample"))))
+```
+
+Merge the dataframes together using match and annotate the samples.
+```{r}
+### use match to add the plate data to the read data
+final.read.stats$plate<-my.plates$plate[match(final.read.stats$sample, my.plates$sample)]
+final.read.stats$plate.numeric<-my.plates$plate.numeric[match(final.read.stats$sample, my.plates$sample)]
+final.read.stats$type<-my.plates$type[match(final.read.stats$sample,my.plates$sample)]
+
+### set the plotting order of the plates
+final.read.stats$plate<-factor(reorder(final.read.stats$plate, final.read.stats$plate.numeric))
+
+### make sample and plate factors for faceting and ordering
+final.read.stats$sample<-as.factor(final.read.stats$sample)
+final.read.stats$plate<-as.factor(final.read.stats$plate)
+
+### subset the data to only keep the numbers of reads at each stage
+final.read.stats.subs<-subset(final.read.stats, select=c("sample", "total", "trimmed.total", "queries", "plate", "type"))
+
+### melt the data into long format
+final.read.stats.subs.melt<-melt(final.read.stats.subs, id.vars=c("sample", "type", "plate"))
+```
+
+Plot the read depth by plate including positives and negatives.
+```{r}
+### make the ggplot object + add the jittered dots + add the boxplots and colour them by trim level and make them a bit transparent
+all.samples<-ggplot(aes(y = value, x = plate, fill = variable), data = final.read.stats.subs.melt) +
+  ### plot the points
+  geom_point(pch = 21, position = position_jitterdodge(), stroke = 0.2) +
+  ### make the boxplot and suppress the outliers as we are plotting the points anyway
+  geom_boxplot(aes(fill=variable), alpha=0.5, position = position_dodge(width = 0.85), outlier.shape = NA, lwd=0.2) +
+  ### fix the axes titles
+  labs(y = "Reads per PCR well", x="PCR plate") +
+  scale_fill_discrete(name="Trim level", 
+                      breaks=c("total", "trimmed.total", "queries"), 
+                      labels=c("Raw reads", "Trimmed reads", "Paired reads in clusters")) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0,65000)) +
+  ### rotate the x-axis labels and resize the text for the svg
+  theme(axis.text.x = element_text(size=rel(1.5), colour="black", angle=45, hjust=1), 
+        axis.text.y = element_text(size=rel(1.5), colour="black", angle=45, hjust=1), 
+        axis.title.y = element_text(size=rel(2), vjust=2), 
+        axis.title.x = element_text(size=rel(2), vjust=-1.3), 
+        legend.text = element_text(size = rel(1.5)), 
+        legend.title = element_text(size = rel(1.5), vjust=1), 
+        legend.position = "right", 
+        legend.key.height=unit(2, "line"), 
+        legend.key=element_blank(), 
+        legend.background = element_blank(), 
+        panel.background = element_blank(), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        axis.line = element_blank(), 
+        panel.border = element_rect(colour = "black", fill=NA, size=1), 
+        plot.margin=unit(c(0.1, 0.1, 1, 1), "lines"))
+
+### Plot above as a svg
+svg(file="diagrams/trimming_summary_all_samples_run2.svg",12,8)
+all.samples
+dev.off()
+
+### Plot above here for convenience
+all.samples
+```
+
+Plot the read depth by plate excluding positives and negatives.
+```{r}
+### make the ggplot object + add the jittered dots + add the boxplots and colour them by trim level and make them a bit transparent
+samples.only<-ggplot(aes(y = value, x = plate, fill = variable), data = subset(final.read.stats.subs.melt, final.read.stats.subs.melt$type=="Moth sample")) +
+  ### plot the points
+  geom_point(pch = 21, position = position_jitterdodge(), stroke = 0.2) +
+  ### make the boxplot and suppress the outliers as we are plotting the points anyway
+  geom_boxplot(aes(fill=variable), alpha=0.5, position = position_dodge(width = 0.85), outlier.shape = NA, lwd=0.2) +
+  ### fix the axes titles
+  labs(y = "Reads per PCR well", x="PCR plate") +
+  scale_fill_discrete(name="Trim level", 
+                      breaks=c("total", "trimmed.total", "queries"), 
+                      labels=c("Raw reads", "Trimmed reads", "Paired reads in clusters")) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0,65000)) +
+  ### rotate the x-axis labels and resize the text for the svg
+  theme(axis.text.x = element_text(size=rel(1.2), colour="black", angle=45, hjust=1), 
+        axis.text.y = element_text(size=rel(1.2), colour="black", angle=45, hjust=1), 
+        axis.title.y = element_text(size=rel(1.6), vjust=2), 
+        axis.title.x = element_text(size=rel(1.6), vjust=-1.3), 
+        legend.text = element_text(size = rel(1.4)), 
+        legend.title = element_text(size = rel(1.3), vjust=1), 
+        legend.position = "right", 
+        legend.key.height=unit(2, "line"), 
+        legend.key=element_blank(), 
+        legend.background = element_blank(), 
+        panel.background = element_blank(), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        axis.line = element_blank(), 
+        panel.border = element_rect(colour = "black", fill=NA, size=0.1), 
+        plot.margin=unit(c(0.1, 0.1, 1, 1), "lines"))
+
+### Plot above as a svg
+svg(file="diagrams/Figure3_run2.svg",10,5)
+samples.only
+dev.off()
+
+### Plot above here for convenience
+samples.only
+```
+
+Plot the read depth by PCR well type
+```{r}
+### order the sample types for plotting
+final.read.stats.subs.melt$type <- factor(final.read.stats.subs.melt$type, 
+                                levels=c("Moth sample", 
+                                         "DNApositive", 
+                                         "PCRpositive", 
+                                         "Negative"))
+
+### make the ggplot object + add the jittered dots + add the boxplots and colour them by trim level and make them a bit transparent
+sample.types<-ggplot(aes(y = value, x = type, fill = variable), data = final.read.stats.subs.melt) +
+  ### plot the points
+  geom_point(pch = 21, position = position_jitterdodge(), stroke = 0.2) +
+  ### make the boxplot and suppress the outliers as we are plotting the points anyway
+  geom_boxplot(aes(fill=variable), alpha=0.5, position = position_dodge(width = 0.85), outlier.shape = NA, lwd=0.2) +
+  ### fix the axes titles
+  labs(y = "Reads per PCR well", x="Sample type") +
+  scale_fill_discrete(name="Trim level", 
+                      breaks=c("total", "trimmed.total", "queries"), 
+                      labels=c("Raw reads", "Trimmed reads", "Paired reads in clusters")) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0,65000)) +
+  ### rotate the x-axis labels and resize the text for the svg
+  theme(axis.text.x = element_text(size=rel(1.2), colour="black", angle=45, hjust=1), 
+        axis.text.y = element_text(size=rel(1.2), colour="black", angle=45, hjust=1), 
+        axis.title.y = element_text(size=rel(1.6), vjust=2), 
+        axis.title.x = element_text(size=rel(1.6), vjust=-1.3), 
+        legend.text = element_text(size = rel(1.4)), 
+        legend.title = element_text(size = rel(1.3), vjust=1), 
+        legend.position = "right", 
+        legend.key.height=unit(2, "line"), 
+        legend.key=element_blank(), 
+        legend.background = element_blank(), 
+        panel.background = element_blank(), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        axis.line = element_blank(), 
+        panel.border = element_rect(colour = "black", fill=NA, size=0.1), 
+        plot.margin=unit(c(0.1, 0.1, 1, 1), "lines"))
+
+### Plot above as a svg
+svg(file="diagrams/Figure4_run2.svg", 10, 5)
+sample.types
+dev.off()
+
+### Plot above here for convenience
+sample.types
+```
+
+###Trimming summary
+```{r}
+### totals and counts for text
+counting<-subset(final.read.stats, final.read.stats$type=="Moth sample")
+
+paste("PCR success (moth samples only) = ", round((1-(sum(my.plates$strength=="fail")/nrow(counting)))*100,1),"%",sep="")
+paste("Sequencing success (moth samples only) = ", round((sum(counting$queries>0)/nrow(counting))*100,1),"%",sep="")
+
+paste("Total raw reads for all samples=", sum(final.read.stats$total))
+paste("Total trimmed reads for all samples=", sum(final.read.stats$trimmed.total))
+
+paste("Maximum raw read count for moth samples =", max(counting$total))
+paste("Minimum raw read count for moth samples =", min(counting$total))
+paste("Mean raw read count for moth samples =", round(mean(counting$total),1))
+paste("Standard deviation of raw read count for moth samples =", round(sd(counting$total),1))
+paste("Total raw reads for moth samples=", sum(counting$total))
+
+paste("Maximum trimmed read count for moth samples =", max(counting$trimmed.total))
+paste("Minimum trimmed read count for moth samples =", min(counting$trimmed.total))
+paste("Mean trimmed read count for moth samples =", round(mean(counting$trimmed.total),1))
+paste("Standard deviation of trimmed read count for moth samples =", round(sd(counting$trimmed.total),1))
+paste("Total trimmed reads for moth samples=", sum(counting$trimmed.total))
+
+paste("Maximum retained cluster count for moth samples =", max(counting$cluster_above_thres))
+paste("Minimum retained cluster count for moth samples =", min(counting$cluster_above_thres))
+paste("Mean retained cluster count for moth samples =", round(mean(counting$cluster_above_thres),1))
+paste("Standard deviation of retained cluster count for moth samples =",
+      round(sd(counting$cluster_above_thres),1))
+
+paste("Maximum reads per well for moth samples =", max(counting$queries))
+paste("Minimum reads per well for moth samples =", min(counting$queries))
+paste("Mean reads per well for moth samples =", round(mean(counting$queries),1))
+paste("Standard deviation of reads per well for moth samples =", round(sd(counting$queries),1))
+paste("Total clustered reads for moth samples =", sum(counting$queries))
+```
+
+###Well composition
+We now need to parse the assignments into a per well composition diagram and calculate percentage parasitism.
+
+Read in the assignment data
+```{r}
+my.assignments<-read.table(file="data/metaBEAT_transpose_run2.tsv", stringsAsFactors=FALSE, header=TRUE, sep="\t")
+### because the data from metaBEAT has been transposed, the column header for column one is now a row header and needs to be replaced to make sense
+colnames(my.assignments)[1]<-"sample"
+```
+
+we need to process this data quite a bit to get it annotated, formatted and into the correct order for plotting
+```{r}
+### Combine all the fungal sequences as we aren't using the correct marker to examine them properly
+my.assignments$Fungi<-rowSums(my.assignments[c("Beauveria_bassiana","Penicillium","Ascomycota")])
+my.assignments<-my.assignments[c(1,3:6,8,11,10)]
+
+### Use match to add the plate data to the read data
+my.assignments$plate<-my.plates$plate[match(my.assignments$sample, my.plates$sample)]
+my.assignments$plate.numeric<-my.plates$plate.numeric[match(my.assignments$sample, my.plates$sample)]
+my.assignments$type<-my.plates$type[match(my.assignments$sample, my.plates$sample)]
+
+### Make sample and plate factors for faceting and ordering
+my.assignments$sample<-as.factor(my.assignments$sample)
+my.assignments$plate<-as.factor(my.assignments$plate)
+
+### Total all the reads
+my.assignments$total<-rowSums(my.assignments[c(2:8)])
+### calculate the percentage of reads in each well that are OPM
+my.assignments$percent.thau<-ifelse(my.assignments$total>0,(my.assignments$Thaumetopoea_processionea/my.assignments$total)*100,0)
+
+### order the type for ordering the samples in the plot
+my.assignments$type <- factor(my.assignments$type,
+                                   levels=c("Moth sample","DNApositive","PCRpositive","Negative"))
+
+### Reorder the wells by decreasing %OPM and increasing Carcelia and partition by type
+my.assignments<-my.assignments[with(my.assignments, order(-total)), ]
+my.assignments<-my.assignments[with(my.assignments, order(-percent.thau)), ]
+my.assignments<-my.assignments[with(my.assignments, order((Carcelia_iliaca/total))), ]
+my.assignments<-my.assignments[with(my.assignments, order(type)), ]
+
+# Create a plotting order
+my.assignments$order<-factor(seq(1, nrow(my.assignments),1))
+
+
+### make a panel factor after setting the decreasing OPM order
+my.assignments$panel<-as.factor(c(rep(1,times=length(my.assignments$sample)/4),
+                                       rep(2,times=length(my.assignments$sample)/4),
+                                       rep(3,times=length(my.assignments$sample)/4),
+                                       rep(4,times=length(my.assignments$sample)/4)))
+
+### melt the data into long format
+my.assignments.melt<-melt(my.assignments, id.vars=c("sample","plate","plate.numeric","percent.thau","type","panel","order","total"))
+colnames(my.assignments.melt)<-c("Sample","Plate","Plate.numeric","Percent.Thau","Type","Panel","Order","Total_reads","Species","Reads")
+my.assignments.melt$Sample<-as.character(my.assignments.melt$Sample)
+```
+
+Create a separate dataframe to plot OTUs per well
+```{r}
+### Create a separate dataframe containing only samples
+my.assignments.samps.only<-subset(my.assignments, type=="Moth sample")
+
+### count the columns greater than zero and write to a new data frame - this is used for the barplot below the composition diagram
+hit.hist<-data.frame(OTUs = rowSums(my.assignments.samps.only[c(2:8)] != 0), type=my.assignments.samps.only$type)
+```
+
+We need to make a colour scale to make assignments clearer. For the number of assignments we have, automatic colour selection often results in colours difficult to discern.
+
+```{r}
+my.colours<-brewer.pal(n=(length(unique(my.assignments.melt$Species))-1),'Paired')
+my.colours[length(my.colours)+1]<-"#000000"
+```
+
+
+Plot the well composition and OTUs per well diagram
+```{r}
+### set up the ggplot
+well.composition<-ggplot(data=my.assignments.melt, aes(x=Order, y=Reads, fill=Species)) +
+  ### make it a stacked barplot and set the bars to be the same height
+  geom_bar(position="fill", stat="identity") +
+  ### wrap the plot by plate
+  facet_wrap(~Panel, scales="free_x", nrow=4, ncol=1) +
+  ### give it a percentage scale
+  scale_y_continuous(labels = percent_format(), expand = c(0, 0)) +
+  ### set the colours
+  scale_fill_manual(name="Species",
+                      values = my.colours) +
+  ### add a sensible y axis label
+  labs(y = "% of reads per well", x="PCR wells") +
+  ### rotate the x-axis labels and resize the text for the svg
+  theme(axis.text.x = element_blank(),
+        #axis.text.x = element_text(size = rel(0.3), colour = "black", angle=90),
+        axis.ticks.x=element_blank(),
+        axis.text.y = element_text(size = rel(1.1), colour="black"),
+        axis.title.y = element_text(size = rel(1), vjust=2),
+        axis.title.x = element_text(size = rel(1), vjust=-1.3),
+        legend.text = element_text(size = rel(1), face="italic"),
+        legend.title = element_text(size = rel(1)),
+        strip.text.x = element_blank(),
+        strip.background=element_blank(),
+        legend.position = "bottom",
+        legend.background = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.spacing = unit(1, "lines"),
+        axis.line = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA, size=0.1),
+        plot.margin=unit(c(0.1, 0.1, 1, 1), "lines"))
+
+### Make a ggplot object of our OTU counts
+hist<- ggplot(hit.hist, aes(factor(reorder(OTUs, -OTUs)))) +
+  geom_bar(alpha=0.5, fill="#3399ff") + labs(y = "Frequency", x="OTUs per well") +
+  coord_flip() +
+  ### rotate the x-axis labels and resize the text for the svg
+  theme(axis.text = element_text(size = rel(1.1), colour="black"),
+        axis.title.y = element_text(size = rel(1), vjust=2),
+        axis.title.x = element_text(size = rel(1), vjust=-1),
+        panel.grid.minor = element_blank(),
+        axis.line = element_blank(),
+        plot.margin=unit(c(0.1, 0.1, 1, 1), "lines"))
+
+svg(file="diagrams/Figure8_run2.svg", width=12, height=8)
+grid.arrange(well.composition, hist, heights=c(3/4, 1/4), ncol=1)
+dev.off()
+
+### Plot above here for convenience
+grid.arrange(well.composition, hist, heights=c(3/4, 1/4), ncol=1)
+```
+
+###Calculating percentage parasitism
+```{r}
+### divide the number of wells containing ach parasitoid by number of wells that are not +ve or -ve to get percentage
+percent.carcelia<-(colSums(my.assignments["Carcelia_iliaca"] > 0)/1012)*100
+percent.compsilura<-(colSums(my.assignments["Compsilura_concinnata"] > 0)/1012)*100
+
+paste("Percentage parasitism for Carcelia illiaca = ", round(percent.carcelia,1),"%", sep="")
+paste("Percentage parasitism for Compsilura concinnata = ", round(percent.compsilura,1),"%", sep="")
+```
+

@@ -38,4 +38,5 @@ vignettes/*.pdf
 Raw_data
 Processed_data
 data
+diagrams
 Jupyter_notebook/.ipynb_checkpoints
